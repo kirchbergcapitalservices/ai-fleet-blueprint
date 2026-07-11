@@ -119,12 +119,19 @@ So the primary alerter lives on an **always-on worker**, not on the hub:
      alert                  independently of the hub
 ```
 
-The alerter reads heartbeats and probe results for *every* node (published
-through the shared repo, per the hub-and-spoke rule from Chapter 04) and fires a
+The alerter reads heartbeats and probe results for *every* node and fires a
 push notification through a notification helper (e.g. Telegram/ntfy). Because it
 runs on a machine that never sleeps, alarms fire whether or not the laptop is
 awake. **Never host your dead-man's switch on the machine most likely to be
 dead.**
+
+> **Note on the hub-and-spoke rule:** Chapter 04's "nodes never talk to each
+> other" applies to *state transfer* — knowledge always moves through git.
+> Read-only monitoring probes (SSH `stat`/`cat` of a heartbeat file, an HTTP
+> health endpoint) are the sanctioned exception: they transfer no state and
+> must never mutate the probed node. If you prefer zero node-to-node SSH,
+> publish heartbeats through the shared repo instead — at the cost of commit
+> noise and probe latency.
 
 ## Alert-only watchdogs vs. self-healing
 

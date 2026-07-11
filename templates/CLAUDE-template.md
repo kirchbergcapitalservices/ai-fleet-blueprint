@@ -17,7 +17,7 @@
 ## Git discipline (multi-writer safety)
 
 - **Pull before editing** any shared repo; **push immediately** after committing.
-- **Writes only via safe paths:** `git-safe-commit-push.sh` or the wiki sync script with explicit file lists — never a naked `git push`, never `--no-verify`.
+- **Writes only via safe paths:** `git-safe-commit-push.sh` (explicit file lists) or `log-append.sh` for the log — never a naked `git push`, never `--no-verify`.
 - **Conflict → escalate, never force.** A rebase abort means another machine edited the same file: coordinate, don't clobber.
 - **Canonical git identity only** (the noreply address). NEVER construct/guess a git identity — look it up.
 

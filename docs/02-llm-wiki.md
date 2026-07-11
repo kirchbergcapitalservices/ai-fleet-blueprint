@@ -117,7 +117,7 @@ Links are what turn a folder of files into a knowledge graph. Two directions mat
 - **Backward** — when you add article Y that relates to existing X, add a link from X to Y
   too. One-way links rot; the reader landing on X never learns Y exists.
 
-Use `[[slug]]` wildcard links freely, even to articles that don't exist yet. A dangling
+Use `[[slug]]` wikilinks freely, even to articles that don't exist yet. A dangling
 link is not an error — it's a to-do marking a concept worth writing up later.
 
 ## Lint rules
@@ -148,7 +148,8 @@ Cheap, mechanical checks run on every write keep the wiki from decaying:
 ## Minimal setup steps
 
 1. **One repo, two trees**: `wiki/` (mutable articles, one file per concept) and
-   `log/` (append-only, e.g. one file per month).
+   a single append-only `log.md` at the repo root (written only via
+   `scripts/log-append.sh`; split into monthly files later if it grows huge).
 2. **Adopt the article schema** — front-matter template above, checked in as a
    `_template.md`.
 3. **Write the read-before-answering rule into every agent's instructions.** This is the

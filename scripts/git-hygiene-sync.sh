@@ -13,12 +13,17 @@
 # Design choices that matter:
 #  - NO auto-commit/auto-push: the watcher surfaces problems, humans/agents fix
 #    them deliberately. Auto-pushing half-finished work spreads breakage.
-#  - Skips a repo while its write-lock exists (don't interfere mid-commit).
+#  - Skips a repo while `.sync-lock` exists — the SAME lock every writer
+#    (git-safe-commit-push.sh, log-append.sh) takes. One name, one contract.
+#  - Untracked files COUNT as dirty: in a wiki workflow, brand-new articles
+#    are the normal case — an alert that ignores them misses most drift.
 #  - Repos it doesn't find are skipped silently → one list works fleet-wide.
+#  - If the notify helper is missing, alerts go to stdout/cron-mail — an alert
+#    channel failing silently would defeat the whole point.
 # =============================================================================
 set -uo pipefail
 
-NOTIFY="${NOTIFY_HELPER:-$HOME/bin/notify}"   # any push-notification helper (Telegram/ntfy/...)
+NOTIFY="${NOTIFY_HELPER:-$HOME/bin/notify}"
 NODE="$(hostname -s)"
 REPOS="wiki node-memory memory project-alpha project-beta"   # adapt to your fleet
 
@@ -26,12 +31,12 @@ ALERT=""
 for r in $REPOS; do
   d="$HOME/Developer/$r"
   [ -d "$d/.git" ] || continue          # this node doesn't have it → fine
-  [ -f "$d/.sync-lock" ] && continue    # a writer is mid-commit → don't interfere
+  [ -e "$d/.sync-lock" ] && continue    # a writer is mid-commit → don't interfere
   br="$(git -C "$d" symbolic-ref --short HEAD 2>/dev/null)" || continue
   git -C "$d" rev-parse "@{u}" >/dev/null 2>&1 || continue
   git -C "$d" fetch -q origin 2>/dev/null || continue
 
-  dirty="$(git -C "$d" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+  dirty="$(git -C "$d" status --porcelain --untracked-files=normal | wc -l | tr -d ' ')"
   ahead="$(git -C "$d" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
   behind="$(git -C "$d" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
 
@@ -42,7 +47,12 @@ for r in $REPOS; do
   fi
 done
 
-if [ -n "$ALERT" ] && [ -x "$NOTIFY" ]; then
-  "$NOTIFY" -t "⚠️ git hygiene ${NODE}" "Left behind → commit/push (or reconcile):${ALERT}"
+if [ -n "$ALERT" ]; then
+  MSG="Left behind → commit/push (or reconcile):${ALERT}"
+  if [ -x "$NOTIFY" ]; then
+    "$NOTIFY" -t "⚠️ git hygiene ${NODE}" "$MSG"
+  else
+    echo "⚠️ git hygiene ${NODE}: $MSG"    # cron mails stdout — never silent
+  fi
 fi
 exit 0

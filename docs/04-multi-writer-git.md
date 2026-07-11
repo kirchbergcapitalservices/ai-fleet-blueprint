@@ -120,22 +120,28 @@ machine can corrupt an in-progress commit or stage each other's half-written
 files. For that we use a local lock plus a pre-commit guard.
 
 ```bash
-LOCK="$repo/.git/fleet.lock"
-exec 9>"$LOCK"
-if ! flock -n 9; then
+# One canonical lock per repo: .sync-lock — the SAME file every writer takes
+# (safe-push, log-append) and the hygiene watcher respects. Atomic via
+# noclobber (works on macOS bash 3.2 — flock(1) does not exist there):
+LOCK="$repo/.sync-lock"
+if ! ( set -o noclobber; echo "$$|$(date +%s)|reason" > "$LOCK" ) 2>/dev/null; then
   echo "another local session holds the repo lock — waiting/skip"; exit 1
 fi
+trap 'rm -f "$LOCK"' EXIT
 # … do the pull → edit → commit → push under the lock …
+# Stale-lock rule: if the holder PID is dead or the lock is >5 min old, clean it.
 ```
 
 | Mechanism            | Guards against                         | Scope        |
 | -------------------- | -------------------------------------- | ------------ |
-| `flock` lockfile     | two local sessions committing at once  | one machine  |
+| `.sync-lock` (noclobber) | two local sessions committing at once | one machine  |
 | pre-commit hook      | committing when a sibling holds lock   | one machine  |
 | safe-push rebase     | two nodes pushing to the remote        | whole fleet  |
 
-The lockfile is same-machine only — `flock` does not reach across nodes, and it
+The lockfile is same-machine only — it does not reach across nodes, and it
 does not need to, because the remote already serializes cross-node writes.
+**One name, one contract:** scripts/git-safe-commit-push.sh and scripts/log-append.sh
+take `.sync-lock`; scripts/git-hygiene-sync.sh skips a repo while it exists.
 
 ## File-scoped staging: the parallel-session sweep
 

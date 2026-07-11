@@ -12,32 +12,47 @@
 # finds no diff. Two independent copy paths, one truth.
 #
 # Usage:    backup-own-memories.sh <node-name>        # e.g. worker-a
-# Schedule: cron, e.g.  47 */6 * * *  (heartbeat file proves it ran — watch it!)
+# Schedule: cron, e.g.  47 */6 * * *
+# Heartbeat: $HOME/.heartbeats/backup-own-memories-<node>.done — persistent
+#            path, NOT /tmp (which is wiped on reboot → false-stale alarms).
 #
-# LESSON baked in: never hardcode a list of source paths in a backup script —
-# glob the parent. A hardcoded 2-path list once silently missed ~22 projects.
+# LESSONS baked in:
+#  - never hardcode a list of source paths — glob the parent (a hardcoded
+#    2-path list once silently missed ~22 projects)
+#  - a missing SOURCE dir is a FAILURE, not an empty success: wrong user/path
+#    would otherwise back up nothing while the heartbeat says "ok" forever
 # =============================================================================
 set -o pipefail
 
 NODE="${1:?usage: backup-own-memories.sh <node-name>}"
 NOTIFY="${NOTIFY_HELPER:-$HOME/bin/notify}"
-SRC="$HOME/.claude-worker/projects"        # worker profile's project memories
-HB="/tmp/backup-own-memories-$NODE.done"   # heartbeat (note: /tmp dies on reboot)
+SRC="${MEMORY_SRC:-$HOME/.claude-worker/projects}"   # worker profile's project memories
+HBDIR="$HOME/.heartbeats"; mkdir -p "$HBDIR"
+HB="$HBDIR/backup-own-memories-$NODE.done"
 TS="$(date '+%Y-%m-%d %H:%M:%S')"
+
+fail() {  # heartbeat says FAIL (never a silent green), notify, exit
+  echo "$TS FAIL: $1" > "$HB"
+  [ -x "$NOTIFY" ] && "$NOTIFY" -t "Memory backup FAILED ($NODE)" "$1"
+  echo "FAIL: $1" >&2
+  exit "${2:-1}"
+}
+
+# a missing source is a config error (wrong user? wrong profile dir?) — FAIL LOUDLY
+[ -d "$SRC" ] || fail "memory source dir missing: $SRC (wrong user or profile?)" 3
 
 # locate the node-memory clone
 NM=""
 for c in "$HOME/node-memory" "$HOME/Developer/node-memory"; do
   [ -d "$c/.git" ] && { NM="$c"; break; }
 done
-if [ -z "$NM" ]; then
-  echo "$TS FAIL: node-memory clone missing" > "$HB"
-  [ -x "$NOTIFY" ] && "$NOTIFY" -t "Memory backup FAILED ($NODE)" "node-memory clone missing"
-  exit 3
-fi
+[ -n "$NM" ] || fail "node-memory clone missing" 3
 
-cd "$NM" || exit 3
-git pull --rebase --autostash -q origin main 2>/dev/null || true
+cd "$NM" || fail "cannot cd into $NM" 3
+BR="$(git symbolic-ref --short HEAD)"
+if ! git pull --rebase --autostash -q origin "$BR" 2>/dev/null; then
+  git rebase --abort 2>/dev/null || true   # never leave the repo mid-rebase
+fi
 
 # mirror EVERY project's memory dir (glob, not a hardcoded list)
 for d in "$SRC"/*/memory; do
@@ -51,22 +66,19 @@ done
 
 # commit + push (disjoint path = only this node's subtree; rebase-safe retry)
 git add "$NODE/claude-worker-memory" 2>/dev/null
-FAIL=""
 if ! git diff --cached --quiet; then
   git commit -q -m "auto: $NODE self-backup worker memories $TS"
   pushed=""
   for i in 1 2 3; do
-    if git pull --rebase --autostash -q origin main 2>/dev/null && git push -q origin main 2>/dev/null; then
-      pushed=1; break
+    if git pull --rebase --autostash -q origin "$BR" 2>/dev/null; then
+      git push -q origin "$BR" 2>/dev/null && { pushed=1; break; }
+    else
+      git rebase --abort 2>/dev/null || true
     fi
     sleep 3
   done
-  [ -z "$pushed" ] && FAIL="push-failed"
+  [ -z "$pushed" ] && fail "push-failed (commit is local; next run retries)" 1
 fi
 
-echo "$TS $NODE self-backup ${FAIL:-ok}" > "$HB"
-if [ -n "$FAIL" ]; then
-  [ -x "$NOTIFY" ] && "$NOTIFY" -t "Memory backup FAILED ($NODE)" "$NODE self-backup: $FAIL"
-  exit 1
-fi
+echo "$TS $NODE self-backup ok" > "$HB"
 exit 0

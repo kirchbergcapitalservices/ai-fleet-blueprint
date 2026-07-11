@@ -21,7 +21,7 @@
 ## Scheduled jobs on this node
 | Job | Schedule | What | Heartbeat |
 |---|---|---|---|
-| <job> | cron `NN */6 * * *` | <what it does> | `/tmp/<job>.done` |
+| <job> | cron `NN */6 * * *` | <what it does> | `~/.heartbeats/<job>.done` |
 
 ## Anti-patterns (stop immediately)
 - ❌ <node-specific traps discovered the hard way — keep this list alive>

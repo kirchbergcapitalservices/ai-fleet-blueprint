@@ -1,0 +1,79 @@
+#!/bin/bash
+# =============================================================================
+# pre-commit — the repo lock for DIRECT commits (helpers take it themselves).
+#
+# Installed as a SYMLINK by scripts/hooks/install.sh, which also links it as
+# pre-merge-commit and pre-rebase. A hook that only lives in .git/hooks is not
+# cloned: every other clone silently runs without it, while the docs still call
+# it a gate. Versioning the hook and linking it in makes it reviewable, identical
+# on every node, and checkable (`install.sh --check`).
+#
+# What it does:
+#   1. A helper holds the lock and runs `git commit` as its child: this hook inherited
+#      the helper's fd 8 (inode comparison, no lock operation) → pass straight through.
+#   2. A direct `git commit`: take the lock (wait REPO_LOCK_HOOK_WAIT_S, default 20 s) and
+#      hand it to a KEEPER process that holds it until the git process ($PPID) ends —
+#      checked by PID AND start time, so a recycled PID cannot keep it alive. The lock
+#      therefore covers the whole commit (incl. commit-msg/post-commit), not just the
+#      milliseconds this hook runs.
+#   3. Busy → "⛔ COMMIT BLOCKED" with the holder, rc 1. A live holder is never evicted.
+#      The lock cannot be checked (tool or lib missing) → also blocked: "not checked"
+#      is never "free".
+# Scope of the guarantee: the WHOLE-transaction, kernel-inherited lock is what the HELPERS give
+# (git-safe-commit-push.sh, log-append.sh, …): git runs as their child and inherits the fd. This hook
+# makes a DIRECT commit wait for a busy lock and keeps the lock for as long as the git process
+# lives, via a keeper process that watches that PID — a weaker, best-effort guarantee. Automation
+# must use the helpers; direct commits are the human convenience path.
+# Not covered — git runs no hook before them: merge --no-commit, cherry-pick, revert,
+# checkout, reset, stash, pull. Run those under a helper that holds the lock.
+# Known limit: as pre-rebase, the keeper holds the lock for the whole rebase. A commit
+# started INSIDE that rebase (`git rebase --exec 'git commit …'`) did not inherit the
+# lock and waits for it until REPO_LOCK_HOOK_WAIT_S, then fails. Run such a rebase
+# under a lock-holding wrapper instead (the commits inherit the lock from the wrapper).
+# `--no-verify` bypasses all of this; never use it in automation.
+# =============================================================================
+set -u
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+self="$0"                                    # resolve the symlink to find our lib
+while [ -L "$self" ]; do
+  t="$(readlink "$self")"
+  case "$t" in /*) self="$t" ;; *) self="$(dirname "$self")/$t" ;; esac
+done
+LIB="$(dirname "$self")/../lib/repo-lock.sh"
+[ -r "$LIB" ] || { echo "⛔ COMMIT BLOCKED — lock library missing ($LIB): NOT CHECKED. Fix: scripts/hooks/install.sh --check" >&2; exit 1; }
+# shellcheck source=../lib/repo-lock.sh
+. "$LIB"
+
+LF="$(repo_lock_file "$ROOT" repo-lock)" || exit 0
+repo_lock_held "$ROOT" && exit 0                                  # 1 · inherited from a helper
+
+( : >> "$LF" ) 2>/dev/null || { echo "⛔ COMMIT BLOCKED — cannot create $LF: NOT CHECKED" >&2; exit 1; }
+exec 8>>"$LF"
+W="${REPO_LOCK_HOOK_WAIT_S:-20}"; case "$W" in ''|*[!0-9]*) W=20 ;; esac
+repo_lock_flock_fd 8 "$W"; rc=$?
+if [ "$rc" -ne 0 ]; then                                          # 3 · busy / not checkable
+  exec 8>&-
+  echo "⛔ COMMIT BLOCKED — another writer holds this clone's transaction lock." >&2
+  if [ "$rc" -eq 2 ]; then repo_lock_diagnose "${LF%.flock}.holder" "$LF" "$W"
+  else echo "   lock tool failed (rc $rc) — NOT CHECKED, treated as busy." >&2; fi
+  echo "   Wait and retry. Never --no-verify; deleting a marker file changes nothing." >&2
+  exit 1
+fi
+
+GITPID=$PPID                                                      # 2 · hand over to a keeper
+GITSTART="$(ps -o lstart= -p "$GITPID" 2>/dev/null)"
+MARKER="${LF%.flock}.holder"
+printf '%s|%s|direct git commit\n' "$GITPID" "$(date +%s)" > "$MARKER" 2>/dev/null || true
+(
+  while kill -0 "$GITPID" 2>/dev/null; do
+    s="$(ps -o lstart= -p "$GITPID" 2>/dev/null)"
+    [ -n "$s" ] && [ -n "$GITSTART" ] && [ "$s" != "$GITSTART" ] && break   # PID was recycled
+    case "$(ps -o stat= -p "$GITPID" 2>/dev/null)" in Z*) break ;; esac    # git finished (zombie)
+    sleep 0.1
+  done
+  [ "$(cut -d'|' -f1 "$MARKER" 2>/dev/null)" = "$GITPID" ] && rm -f "$MARKER"
+  exec 8>&-
+) </dev/null >/dev/null 2>&1 &          # no inherited stdio: git must not wait for our pipe
+disown 2>/dev/null || true
+exit 0

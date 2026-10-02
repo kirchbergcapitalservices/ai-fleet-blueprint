@@ -1,22 +1,32 @@
 # 05 — Delegating to CLI workers
 
-> A fleet is an org chart made of processes. The `hub` is the department head: it curates,
-> reviews, and owns the final artifact. The workers are the department: they execute
-> well-scoped briefs and report back. Most delegation failures are not model failures —
-> they're brief failures and wiring failures. This chapter is about getting both right.
+> A fleet is an org chart made of processes — but the org chart is about *roles*, not
+> about machines. Most delegation failures are not model failures — they're brief failures
+> and wiring failures. This chapter is about getting both right.
 
-## The department-head model
+## Roles are assignable; gates belong to actions
 
-Draw the analogy explicitly, because it dictates every rule below.
+v1 of this chapter drew a department-head model: the laptop decomposes, reviews and owns;
+workers produce and never publish. We replaced that model one day before v1 shipped and
+did not notice. What it got wrong is subtle and expensive:
 
-| Org concept | Fleet concept | Responsibility |
+| v1 said | What broke | v2 rule |
 |---|---|---|
-| Department head | `hub` (orchestrator, on the laptop) | Decompose work, write briefs, review output, own the final version |
-| Team member | `worker-a` / `worker-b` (CLI on a box) | Execute a scoped brief, report in the requested format, stay in lane |
-| Deliverable | The curated artifact | Assembled and signed off by the hub, not shipped raw by a worker |
+| "the hub curates, workers do not publish" | the laptop became a bottleneck and a single point of failure — nothing left the fleet while it was on a plane | **Any node may write to any shared system**, autonomously and headless. The heavy always-on node is often the owner of a thread; the laptop contributes |
+| safety came from *which node* did a thing | a node gate says *who*, not *what was checked*; it also quietly exempted the laptop from the checks | **Gates sit on actions, not nodes:** sending in the operator's name, publishing, filing, force-pushing, changing security posture — each needs a *human* sign-off, and the same gate applies on every node including the laptop |
+| the hub reviews everything a worker produces | the author's node reviewing is still the author reviewing | executable change is merged by **a different node** than its author, with a second model bound to the exact commit ([docs/10](10-code-gates.md)) |
 
-Workers do not publish. They produce; the hub curates and decides. This keeps a single
-throat to choke for quality and a single boundary check before anything leaves the fleet.
+Headless jobs cannot ask for a sign-off at 03:00. They run under **pre-recorded grants**:
+a human writes the grant for a specific action class (say, "send the weekly digest to
+this list") *before* the job exists; the job checks the grant file and refuses without it.
+Self-granting is forbidden by construction (the grant lives where the worker user cannot
+write). The gate list is **closed**: a job escalates only at listed gates, not for ordinary
+work — "when in doubt, ask" applied to everything makes an autonomous worker useless.
+
+The design question for every write is therefore *"which action gate does this need?"*,
+never *"which node is allowed?"*. And the counter-duty of autonomy is **sync**: whoever
+writes, pushes, logs and makes the change visible to the others. Autonomy without sync is
+drift.
 
 ## The helper pattern
 
@@ -35,11 +45,18 @@ config profile." The moving parts:
 | Mode | Use when | Behavior |
 |---|---|---|
 | Foreground | Short task, you want the result now | Blocks; output streams back |
-| Background | Long task, you'll collect later | Detaches; poll or get notified on completion |
+| Background | Long task, you'll collect later | Detaches on the *hub* side; poll or get notified on completion |
 | `-f` (file brief) | The brief is long or structured | Pass the brief as a file, not an inline string — no quoting hell, reproducible |
 
 A minimal helper is just: `ssh <worker-host> 'CLAUDE_CONFIG_DIR=<profile> <agent-cli> <mode> <brief>'`.
 Everything hard is in the brief and the profile, not the transport.
+
+**The headless iron rule.** "Background" above is about the hub's shell. *Inside* the
+worker, a headless agent turn (`<agent-cli> -p …`) ends when the agent's answer ends — and
+**every background process the agent started dies with it.** Twice we lost long builds this
+way before writing it down. Anything inside a headless turn that must outlive the turn is
+started with `nohup … &` (and the system's sleep-prevention helper), writes its own record,
+and is collected by a later turn. Never an agent "background task" inside a headless run.
 
 ## Brief discipline
 
@@ -58,10 +75,26 @@ Every brief has five parts, in order:
 "1: OK, 2: OK, 3: blocked because…" and you can diff that against the brief line by line.
 
 **The hard DON'Ts list is not optional.** It's the guardrail that keeps an eager agent
-inside its lane. Examples of good DON'Ts: "don't commit or push anything," "don't touch
-any repo — only write files under this folder," "don't quote real operational data,"
-"don't invent facts you can't source." A worker that respects a tight DON'Ts list is safe
-to run unattended; one without it is a liability.
+inside its lane. Examples of good DON'Ts: "don't touch any repo other than the listed one,"
+"don't quote real operational data," "don't invent facts you can't source." But be exact
+about what it is: **the DON'Ts bound the agent's *scope*; enforcement bounds the *damage*.**
+A brief is read by a probabilistic actor and can be misread, ignored or injected around.
+What makes a worker safe to run unattended is the unprivileged user, the CLI deny-list and
+the sandbox ([docs/07](07-security.md)) — the brief makes it *useful*.
+
+**Contract numbering.** Give every requirement a stable id (`REQ-1 … REQ-n`) and every
+explicit non-goal one too (`NG-1 … NG-n`), and never renumber. The worker's report is then a
+**scope ledger**: one line per REQ with PASS / FAIL / UNTESTED (+ why), one line per NG
+confirming it was left alone, the sentence `Other behavior changes: None` — and, for anything
+that was written, the **commit hash**. Evidence without a hash is decoration. A worker that
+finds a REQ it can only meet by violating an NG reports the conflict instead of choosing;
+a fix that widens the contract until the test passes is the same failure as an agent that
+widens the spec.
+
+**Define "done" as delivered.** Done is not "I wrote the files". Done is: committed, pushed,
+the hash in the ledger — and the requester **verifies at the receiving end** (its own pull,
+its own file count), never by the sender's word. "There is no auto-pull" is a sentence we
+now put in every brief.
 
 ## Why NO sudo on workers
 
@@ -97,23 +130,39 @@ profiles, and permissions to *that* user, not the one you expected. Assumptions 
 identity are the most expensive kind because every downstream symptom lies about the root
 cause.
 
-## Branch-then-PR for curated resources
+## Prose is written directly; code goes through a branch
 
-When workers contribute to a **shared, curated resource** (the wiki, shared conventions,
-anything the whole fleet reads), they do not write to the canonical version directly. They
-propose; the hub disposes.
+v1 sent *everything* shared through branch → PR → hub merge. That contradicted its own
+architecture chapter ("all nodes read-write") and, in practice, stalled the knowledge loop:
+a wiki article that waits a day for a merge is an article the next session answers without.
+The split that holds:
 
-| Step | Actor | Action |
+| What a worker changes | Path | Why |
 |---|---|---|
-| 1 | worker | Do the work on a **branch** (namespaced to the worker, e.g. `worker-a/<topic>`) |
-| 2 | worker | Open a PR / change request; report it back to the hub |
-| 3 | hub | Review — quality, boundary, correctness |
-| 4 | hub | Merge to canonical (or bounce back with notes) |
+| **Prose**: wiki articles, the append-only log, the index, its own node-memory subtree | **direct write** through the locked helper ([docs/04](04-multi-writer-git.md)) | a hundred small writes a day; the lock and `commit --only` make them safe; a review gate here costs more than it catches |
+| **Executable change**: scripts, hooks, routines, shared agent instructions | **branch → PR → a *different node* merges**, second-model review bound to the commit | merge is deploy; the author has already convinced themselves ([docs/10](10-code-gates.md)) |
 
-This is the department-head model made concrete: workers execute onto branches, the hub
-reviews and owns the merge. The canonical resource never contains unreviewed worker output.
-For a worker's *own private* scratch (its node-memory subtree), direct writes are fine —
-the branch-then-PR ceremony is specifically for shared, curated things.
+Two guards that belong here because they are delegation failures, not git failures:
+
+- **Lock per task id before a worker starts.** The same brief once ran three times in
+  parallel because three consumers picked it up within a minute. A task is claimed by a
+  rename in the inbox (next section) or by a lock keyed on the task id — never by "I'll
+  probably be the only one".
+- **Verify delivery at the endpoint.** The requester pulls and counts; the worker's "done"
+  is a claim.
+
+## The fleet inbox: delegation when SSH is not there
+
+The helper above needs the hub to reach the worker over SSH at the moment of delegation. Often it
+cannot — the hub is asleep, travelling, or the worker needs to hand something *back* to a hub that
+is behind NAT. The durable channel is the repo every node already pulls and pushes on a timer:
+`node-memory`, with one inbox directory per node (layout, routes and the claim-by-rename mechanic in
+[docs/10](10-code-gates.md)). A task is a commit; a result is a file under `done/<node>/`. Review
+requests for pull requests travel the same way, which is what makes "a different node merges"
+workable without a human relaying messages.
+
+Keep the brief discipline identical: the task file *is* the brief — context, numbered tasks, report
+format, DON'Ts — and the first line is the route so the consumer can dispatch without reading prose.
 
 ## Failure modes & guards
 
@@ -123,10 +172,14 @@ the branch-then-PR ceremony is specifically for shared, curated things.
 | **Wandering agent** | Worker "helpfully" touches things it shouldn't | Hard DON'Ts list, explicit and tight |
 | **Unbounded blast radius** | One bad command does system-level damage | No sudo on workers, ever |
 | **Wrong-user wiring** | Paths/config/memory all land in the wrong place | Verify `whoami`/`$HOME` empirically before wiring |
-| **Unreviewed writes to shared truth** | Canonical wiki contains raw, unvetted worker output | Branch-then-PR; hub owns the merge |
-| **Format drift** | Can't compare or diff worker runs | Mandate an exact report format in the brief |
+| **Unreviewed executable change goes live** | A script merged by its author runs on every node | PR + a different node merges; second-model review on the commit |
+| **Node gate instead of action gate** | Laptop is a bottleneck *and* exempt from checks | Gates on actions, valid on every node; pre-recorded grants for headless sends |
+| **Format drift** | Can't compare or diff worker runs | REQ/NG ids + scope ledger with commit hash |
 | **Quoting hell** | Long inline brief breaks on shell escaping | Use the `-f` file-brief mode |
-| **Silent worker** | Long background job, no signal on done/failed | Report format + completion notification |
+| **Silent worker** | Long background job, no signal on done/failed | Verdict record + completion notification; requester verifies at the endpoint |
+| **Background work dies with the turn** | Build vanishes when the headless answer ends | headless iron rule: `nohup`, own record, collect later |
+| **Double dispatch** | One brief runs three times | claim by rename / lock per task id |
+| **"Done" that was never delivered** | Files written, never pushed; hub reads stale state | done = pushed + hash in the ledger, verified by the receiver's own pull |
 
 ## Minimal setup steps
 
@@ -139,10 +192,11 @@ the branch-then-PR ceremony is specifically for shared, curated things.
 4. **Write the helper**: `ssh` + profile env var + mode (foreground / background / `-f`).
 5. **Template the brief**: context → numbered tasks → report format → hard DON'Ts →
    selfcheck. Reuse it for every delegation.
-6. **Set the curation flow**: workers branch + PR into shared resources; the hub reviews
-   and merges. Private scratch can be written directly.
+6. **Split prose from code**: prose is written directly through the locked helper; executable
+   change goes branch → PR → merge by a different node. Write the closed **action-gate list**
+   and the **grant files** for headless sends.
+7. **Teach the headless iron rule** and the task-id lock in every worker's instruction file.
 
-Delegation works when the org chart is real: the hub thinks and owns, the workers execute
-in a bounded lane, and the boundary between them — privileges, identity, review — is wired
-deliberately rather than assumed. Get the brief and the wiring right and the model does the
-rest.
+Delegation works when the roles are real and the gates are on the right thing: any node may
+think and write, the dangerous *actions* wait for a human, and the boundary between them —
+privileges, identity, review — is wired deliberately rather than assumed.

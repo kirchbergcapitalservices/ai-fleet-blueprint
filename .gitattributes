@@ -1,0 +1,3 @@
+# two machines appending at the same moment collide at the end of the file — keep both entries
+log.md    merge=union
+log/*.md  merge=union

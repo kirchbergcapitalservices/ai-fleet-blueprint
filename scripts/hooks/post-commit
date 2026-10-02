@@ -1,0 +1,9 @@
+#!/bin/bash
+# post-commit — counterpart of the versioned pre-commit. The keeper releases the lock of a
+# direct commit as soon as git exits; this hook only removes the INFO marker a little earlier,
+# and only if it was written for exactly this git process ($PPID). It never touches the lock.
+set -u
+GD="$(git rev-parse --git-common-dir 2>/dev/null)" || exit 0
+M="$GD/repo-lock.holder"
+[ -f "$M" ] && [ "$(cut -d'|' -f1 "$M" 2>/dev/null)" = "$PPID" ] && rm -f "$M"
+exit 0

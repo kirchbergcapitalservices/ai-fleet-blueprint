@@ -1,33 +1,47 @@
 # Worker Brief — Template
 
-> A delegation without a written brief produces confident garbage. This template
-> is the minimum. Send via your worker helper: `worker-a-claude -f brief.md -b`
+> **Template — example data, not a live brief.** A delegation without a written brief produces
+> confident garbage; this template is the minimum. In your own fleet a brief like this is handed to
+> a worker helper or dropped as a task file into the node's inbox ([docs/05](../docs/05-worker-delegation.md)).
 
 # Task for worker-a: <one-line title>
 
 Context: <2-4 sentences — why this exists, what decision/goal it serves, what
-already exists that the worker should NOT rebuild.>
+already exists that the worker should NOT rebuild. Give the CURRENT state, dated;
+mark your own assumptions as assumptions.>
 
-## Tasks (idempotent, EXACTLY these, in order)
-1. <concrete step with exact paths/commands — no room for interpretation>
-2. <verification step with expected output — "must print X">
-3. <...>
+## Requirements (stable ids — never renumber)
+- REQ-1 <concrete, checkable — exact paths/commands, no room for interpretation>
+- REQ-2 <verification step with expected output — "must print X">
+- REQ-3 <...>
 
-## Report (as the LAST lines of your answer, compact)
+## Non-goals (also stable ids)
+- NG-1 <what must stay untouched, e.g. "no change to scripts/ outside <dir>">
+- NG-2 <e.g. "no commit to main; branch worker-a/<topic> only">
+
+## Report — the scope ledger (as the LAST lines of your answer)
 ```
-1 <step>: OK/FAIL
-2 <step>: OK/FAIL (<error text if FAIL>)
-...
+REQ-1: PASS | FAIL (<error>) | UNTESTED (<why>) — evidence: <command/output or commit sha>
+REQ-2: ...
+NG-1: untouched — checked by <how>
+NG-2: ...
+Other behavior changes: None
+Delivered: <commit sha(s)> pushed to <remote/branch>   # "done" means pushed, with the hash
+Not checked: <list or "none">
 ```
 
 ## HARD DON'Ts
 - Do NOT touch repos/files outside the listed paths.
-- Do NOT commit/push unless a task explicitly says so (and then only via safe-push).
 - Do NOT generate keys / call GitHub admin APIs / change schedules.
 - NO secrets, key material, or tokens in your output.
 - If a step fails: report FAIL + stop dependent steps — do NOT improvise workarounds.
+  A REQ you can only meet by violating an NG is a CONFLICT to report, not a choice to make.
+- Retry cap: 3 attempts per step, then FAIL.
+- Anything that must outlive this turn: `nohup … &` + its own record (headless iron rule).
 
-# Why the DON'Ts matter (for the human writing the brief)
-Workers run headless with permissions skipped. The brief IS the permission
-boundary. Scope tightly; verification steps make the report trustworthy;
-the report format makes results machine-checkable back on the hub.
+# Why this shape matters (for the human writing the brief)
+The DON'Ts bound the worker's **scope**; they are not its permission boundary. Permissions
+come from the unprivileged OS user, the CLI deny-list and the sandbox ([docs/07](../docs/07-security.md)) —
+those hold even when the brief is misread or injected around. Stable REQ/NG ids make the
+report diffable against the brief; "evidence: <sha>" makes it checkable; and the requester
+verifies delivery at the receiving end (own pull, own file count), never by the sender's word.

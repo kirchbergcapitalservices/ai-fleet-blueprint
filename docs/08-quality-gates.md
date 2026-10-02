@@ -65,7 +65,7 @@ built on them goes external.
 
 | Class-A claim type          | Verify against                         |
 | --------------------------- | -------------------------------------- |
-| identifiers (patent #, IDs) | the primary registry / official record |
+| identifiers (registry numbers, IDs) | the primary registry / official record |
 | citations (papers, DOIs)    | the actual source document             |
 | statistics / numbers        | the cited dataset or paper             |
 | named third-party facts     | an authoritative independent source    |
@@ -82,6 +82,12 @@ A high fabrication *rate* means the generator was hallucinating structurally, so
 you can't trust even the claims that happen to check out. The gate is not "fix
 the bad ones" — it's "reject the batch."
 
+**Registers first.** Across 52 verified Class-A numbers in one of our document sets,
+every figure that came from a public register was correct, and every hard error was a
+figure that had never been published or a ratio the agent had derived itself. So the
+verifier's order of work is: look the number up in the primary register *before* any
+other check; treat derived and unpublished figures as the high-risk class.
+
 ## War stories (anonymized)
 
 Two real incidents, names and numbers removed, that shaped these gates:
@@ -91,7 +97,7 @@ Two real incidents, names and numbers removed, that shaped these gates:
 > primary registry — **four of the six did not exist.** The agent had
 > pattern-matched plausible-looking numbers into being. Without the verifier
 > pass, a document with fabricated identifiers would have reached an external
-> lawyer. The claim-verifier caught it at the gate. This is *why* the >30%-fail
+> party. The claim-verifier caught it at the gate. This is *why* the >30%-fail
 > stop rule exists — that batch was ~67% fabricated.
 
 > **The confident summary.** A single research agent summarized a set of studies
@@ -103,6 +109,58 @@ Two real incidents, names and numbers removed, that shaped these gates:
 
 The lesson both times: **the check has to be independent of the thing it
 checks.** Self-review and fused roles produce false confidence.
+
+## The premise audit: verify what the recommendation stands on
+
+The claim-verifier checks **facts** — numbers, identifiers, citations. It does not check what a
+*recommendation* rests on. That is where the expensive errors hide: an agent decides something
+on a premise that holds only because it was in the brief, or because the agent lacked the
+current operating state — and the main context waves the decision through because the *facts*
+in it are correct.
+
+So before any consolidation, one more independent pass tries to **refute the findings**: a
+sub-agent whose only job is to attack each recommendation's premise.
+
+| Question the premise auditor asks | What the error looks like when found |
+|---|---|
+| Is the premise stated, or assumed? | "we should X because Y" where Y appears nowhere in the sources |
+| Does the premise still hold **today**? | the brief described last month's state; the system changed since |
+| Would the recommendation **widen the scope** of what was asked? | an audit that quietly turns a review into a redesign has the same failure mode as an agent that widens the spec until the test passes |
+| Does it violate a stated non-goal? | the fix is correct and forbidden |
+
+A made-up but typical case: a brief describes a component as "developed in-house" and derives
+from that a licensing recommendation and a cost estimate. Every number in the brief checks out.
+The component turns out to be an open-source library with a licence of its own — the premise
+was never true, and checking it changes the whole recommendation while the claim-verifier,
+correctly, found nothing wrong. Always give the auditor the **current state**, and mark your
+own assumptions as such.
+
+## Three engines, three roles
+
+For research questions that must be answered *reliably* rather than *fast* (literature
+and standards searches, market claims, anything with identifiers), one model family is not enough — not because any one is bad, but because
+their blind spots are **different**, and difference is what you buy. We run three roles across
+three model families, in sequence:
+
+| Stage | Role | What it does | Data class |
+|---|---|---|---|
+| 1 · breadth | *finds* | open web, different index coverage, registries; 3–5 sub-questions, one run each | public / internal only, boundary-filtered |
+| 2 · depth | *checks and contradicts* | gets **all** stage-1 results plus our own state; resolves contradictions at the primary source; says explicitly what is missing | in-house engine, full context |
+| 3 · proof | *verifies* | every Class-A claim against the primary source; **stop at 30 % failure** (see above) | — |
+
+Measured in one of our own runs: the breadth engine found two documents the other two
+families had missed, while getting **3.1 % of identifiers wrong and up to 28.6 % of content
+descriptions wrong** in a single block. The depth
+engine found exactly those errors. No favourite; the numbers assign the roles.
+
+Three rules that fell out of running this:
+
+- **Judge success by content, not by exit code.** A run that returns an empty table "succeeded";
+  require at least one table and a minimum word count, retry up to three times.
+- **No identifier from memory.** Every prompt carries it. Absence claims ("nothing found")
+  need the search terms used *and* a positive control — a known document the search did find.
+- **Synthesis happens at the conductor, never inside the pipeline.** The engines produce
+  evidence; the agent that owns the question weighs it (mechanics in [docs/09](09-second-engine-broker.md)).
 
 ## Fact-gates for outbound messages
 
@@ -118,6 +176,12 @@ containing Class-A claims goes out until those claims are verified.**
 
 The gate is placed at the boundary, not just at authoring time, because a claim
 can be introduced, edited, or corrupted anywhere between draft and send.
+
+Two extensions earned the hard way: **biographical facts are Class-A** — about the
+operator *and* about the recipient (city, role, company, shared history); and **a reused
+template re-verifies every fact slot.** Propagation is the amplifier: a wrong city in one
+message is a typo, the same wrong city copied into twenty is a pattern the recipients
+compare notes about.
 
 ## Score-caps by source tier
 
@@ -151,8 +215,15 @@ explicit **human sign-off.** Agents draft; humans commit the irreversible act.
 
 The dividing line is *reversibility*. A wrong internal draft is edited and
 forgotten. A wrong email to a client, or a wrong filing to an authority, cannot
-be recalled. For those, the machine stops and asks. If an agent is ever unsure
-whether an action crosses the line — it treats it as if it does, and escalates.
+be recalled. For those, the machine stops and asks.
+
+Two refinements for a fleet that runs at night: the gate list is **closed and written
+down** — an agent escalates at the listed gates and nowhere else, because "when in doubt,
+ask" applied to ordinary work makes an autonomous worker useless and trains humans to
+rubber-stamp. And headless jobs that must send act under **pre-recorded grants**: a human
+writes the grant for a named action class before the job exists, in a place the worker
+user cannot write; the job refuses without it. Self-granting is impossible by
+construction, not by instruction.
 
 ## Failure modes & guards
 

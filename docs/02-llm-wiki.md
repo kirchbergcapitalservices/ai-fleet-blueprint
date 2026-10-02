@@ -133,6 +133,44 @@ Cheap, mechanical checks run on every write keep the wiki from decaying:
 | One concept | Article exceeds a soft size cap → split candidate |
 | `updated` is fresh-ish | `status: stable` but `updated` is months old → review flag |
 
+## Keeping the log and the wiki honest over months
+
+Three mechanics that were missing in the first year and that we now consider part of the discipline:
+
+| Mechanic | Rule | Why |
+|---|---|---|
+| **Monthly log rotation** | `log.md` carries the current month; finished months move **byte-identical** to `log/YYYY-MM.md` on the 1st, by one scheduled job on one node. History is searched with `grep -r … log.md log/` | an append-only file that grows forever becomes unreadable and slow to diff; rotation keeps append-only *and* keeps it usable — move, never edit |
+| **Nightly lint on a worker** | orphan check (index ↔ disk), dead links, articles older than 90 days without a `stale` flag; a message only on **delta**, never a daily "all green" | a lint that reports every night is ignored in a week; a lint that reports changes gets read |
+| **The log belongs to `main`** | `log-append.sh` refuses to append on a feature branch: it writes through a throwaway worktree off `origin/main`, or spools the entry to a local file and tells you — it never silently puts a log entry on the wrong branch | two sessions shared one clone; one switched branches, two log entries landed on a feature branch and vanished from the history everyone reads |
+
+## Enforcement, not appeal — four more mechanics
+
+| Mechanic | Rule | Why |
+|---|---|---|
+| **A master index with an orphan gate** | one `index.md` lists every article with a one-line hook; our wiki's write wrapper — a few lines around the generic safe-push helper shipped here, roughly `for f in "$@"; do case $f in wiki/*.md) grep -qF "($f)" index.md \|\| { echo "$f not in index.md"; exit 1; }; esac; done` — **refuses to commit a new article without an index line**; a nightly lint reports index entries without a file and files without an entry | 170 of 598 articles were once invisible to the index — and therefore to every agent that read the index first. An unindexed article is a rumour |
+| **The lint gate lives in the write wrapper** (yours to add on top of `git-safe-commit-push.sh`; the generic helper in this repo is content-agnostic) | not in a pre-commit hook: `.git/hooks` is never cloned, so a hook-based gate exists in one clone and is an assumption in the others ([docs/04](04-multi-writer-git.md)) | "a lint rule without an executable checker is a statement of intent" |
+| **Bump the header in the same commit** | the freshness check reads `updated:` in the article header first and the git date only as fallback | 17 headers once lied about their date; a header that lies makes the freshness check blind. The fix was the headers, not the check |
+| **`log.md merge=union`** in `.gitattributes` (and the rotated `log/*.md`) | two machines appending at the same moment *always* collide at the same place — the end of the file; union merge keeps both entries, order inside a log does not matter | without it, every concurrent append ends in a rebase conflict with one entry stranded locally — the *normal* case with three writers, not an edge case |
+
+One header format across the repo — articles and templates alike. This repo shows YAML
+front matter; pick yours and lint for it.
+
+## Two rules about negative statements
+
+The wiki is where "X does not exist", "Y is gone", "node Z is clean" get written — and those
+sentences fail differently from positive ones. A positive claim breaks visibly when the world
+changes. A negative claim **goes quietly untrue**, and the next confirming glance turns it into a fact.
+
+1. **Date it, scope it, sign it.** "Checked as `<user>` via `<path>` on `<date>`: no such file under `$HOME`." A `~`-path without the user is not a statement — `~` is user-relative, and on macOS the launchd domains of two users do not see each other.
+2. **Past tense, never present as a permanent state.** "Was not present on 22.07." expires cleanly; "is not operable" does damage four weeks later. Dating alone is not enough — the tense is the difference.
+
+And the companion rule for the agent writing it: **an absence claim needs a positive control in the
+same message** — a known-present case that the same search *did* find. A search that returns zero
+for everything is not evidence of absence; it is evidence of a broken search. An unreachable node is
+not "no drift"; it is *unchecked*. In one audit of our own documentation, fifteen false statements
+about two nodes were found — **every one** claimed a node could do *less* than it could. That direction
+never shows up by failing, only by nobody trying.
+
 ## Failure modes & guards
 
 | Failure mode | Symptom | Guard |

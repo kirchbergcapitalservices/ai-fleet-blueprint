@@ -13,9 +13,9 @@
 
 ### Layer 0 — Hub & substrate: GitHub + git
 
-Private GitHub repos are the **only** meeting point. No node hosts repos for another; nodes never sync git peer-to-peer. Every node has working checkouts only, and reads/writes exclusively against `origin`.
+A git remote is the **only** meeting point; nodes never sync git peer-to-peer and never copy files to each other. Private GitHub repos are the default remote. If you hold data that must never reach a cloud host, give it an **in-network bare repository on one always-on node** as its `origin` — with a server-side `pre-receive` hold and a push log — and keep the same topology: every node talks to one remote, nodes still never talk to each other. Every node has working checkouts only.
 
-Why: off-site durability for free, every node independently rebuildable, and the hub laptop can disappear without breaking anyone else's reads or writes.
+Why: off-site durability for free (GitHub), rebuildability of every node from the remote, and the hub laptop can disappear without breaking anyone else's reads or writes.
 
 ### Layer 1 — Shared truth (written knowledge)
 
@@ -27,7 +27,7 @@ Three repos, three different questions:
 | **memory** | "What *happened*?" — episodic session memories, feedback rules, cost snapshots | one fact per file |
 | **node-memory** | "What does each *node* know?" — per-node brains, worker session memories, shared conventions | per-node subtree |
 
-All nodes have **read-write** access to all three (scoped deploy keys per repo per node). Each node writes its own slice and pushes immediately; everyone pulls before reading. See [02-llm-wiki.md](02-llm-wiki.md) and [03-memory-layers.md](03-memory-layers.md).
+All nodes have **read-write** access to all three (scoped deploy keys per repo per node — and no account-wide token on the node, which would void the scoping). Each node writes its own slice and pushes immediately; everyone pulls before reading. Note that an agent CLI keeps **one memory store per profile directory**: a node that runs an interactive profile and a headless worker profile has two stores. Inventory and back up every profile's store, not the one you happen to know. See [02-llm-wiki.md](02-llm-wiki.md) and [03-memory-layers.md](03-memory-layers.md).
 
 **Rule: no two systems claim the same truth.** The wiki holds timeless facts; memory holds episodes; node-memory holds per-node operational state. When you're unsure where something goes, that's a smell — answer "which question does this fact answer?"
 
@@ -47,20 +47,20 @@ Semantic search over documents, code graphs, cross-thread change detection, "who
 |---|---|
 | Pull at start | Every session/job begins with `git pull` on the repos it touches |
 | Write → push immediately | Nothing sits uncommitted; unpushed work is treated as a defect |
-| Safe writes only | `git pull --rebase --autostash` + bounded push-retry; **abort on conflict** rather than clobber ([04-multi-writer-git.md](04-multi-writer-git.md)) |
-| Hourly backstop | A hygiene watcher per node: fast-forward pulls when clean+behind, alerts on dirty/unpushed — never auto-pushes |
+| Safe writes only | one write primitive under the clone's transaction lock: fetch with an explicit refspec, `commit --only` your paths, own stash with index, rebase, bounded push-retry, endpoint check; **abort on conflict** rather than clobber ([04-multi-writer-git.md](04-multi-writer-git.md)) |
+| Hourly backstop | A hygiene watcher per node: fast-forwards clean+behind clones, pushes the one unambiguous case (clean + ahead + not behind), alerts on dirty/diverged, counts and escalates its own skips |
 | Memory self-push | Each worker pushes its own session memories to node-memory on a cron (worker-owned) |
 | Hub pull-backstop | The hub also pulls all nodes' memories daily — a second, independent copy path |
 
-Self-push and pull-backstop target the same subtree with identical content, so they **converge** — whoever runs second finds no diff. That redundancy is deliberate: the self-push works when the hub travels; the hub pull works if a worker's cron dies.
+Each worker's memory subtree has **exactly one writer: that worker.** The hub's pull-backstop pulls the repo (so a copy exists on the hub too) and reads the workers' records for staleness — it does not write into their subtrees. v1 of this document had two writers mirroring the same subtree "so they converge"; that contradicts the one-writer rule in [03-memory-layers.md](03-memory-layers.md) and is exactly the setup in which a second mirror with `--delete` once erased data. One writer per subtree; the second path reads and alarms.
 
 ### Layer 4 — Watchdogs (dead-man's-switches)
 
 Layer 3 must never fail *silently*. Every scheduled job writes a **heartbeat file**; watchers check freshness and content:
 
-- **Per-node health aggregator** (daily): are the launch agents loaded? Are logs/heartbeats fresh? Are the other nodes' checkouts within N commits of origin? Endpoint probes for services (a process can be alive but wedged — probe the endpoint, not the PID).
+- **Per-node health aggregator** (daily): are the launch agents loaded? Are the jobs' verdict records fresh? Are the other nodes' checkouts within N commits of origin? Endpoint probes for services (a process can be alive but wedged — probe the endpoint, not the PID). Every check has **three** outcomes — ok, fail, **unchecked** — and "could not look" is never green.
 - **Hub-independent alerter**: one worker also checks the *other* nodes' heartbeats and alerts directly (push notification), so alarms fire even when the hub laptop is off. This is the piece most setups miss.
-- **Alert-only vs self-healing**: watchdogs that *restart* things fight with the service manager; prefer KeepAlive/daemon supervision for healing and keep watchdogs alert-only.
+- **Alert-only vs self-healing**: watchdogs that *restart* things fight with the service manager; prefer supervision for healing, keep watchdogs alert-only, and alert on **state change** rather than on every run.
 
 See [06-watchdogs.md](06-watchdogs.md).
 
@@ -79,12 +79,14 @@ The fix is symmetry: every node pulls itself fresh, backs itself up, and watches
 | Two nodes edit the same file | safe-push aborts on rebase conflict → escalate to human; never clobber |
 | Backup cron dies quietly | heartbeat file + daily aggregator + hub-independent alerter |
 | Hub offline for days | workers self-push + worker-side alerter keep running |
-| Reboot wipes `/tmp` heartbeats | expect false-stale after reboot; kickstart jobs or persist heartbeats |
+| Reboot wipes `/tmp` records | persist records; a missing record reads as *unchecked*, never as dead or green; boot-grace window |
+| Two writers mirror one subtree | one writer per subtree; the backstop reads and alarms |
+| A check that could not run prints green | three states; unreachable / fetch failed → unchecked |
 
 ## Minimal setup steps
 
 1. Create the three private repos (wiki, memory, node-memory).
-2. Give every node a checkout + scoped deploy keys (RW where it writes).
+2. Give every node a checkout + scoped deploy keys (RW where it writes); keep account-wide tokens off the nodes.
 3. Install the discipline scripts ([scripts/](../scripts/)) + crontabs per node.
 4. Add heartbeats + the health aggregator; put a second alerter on a worker.
 5. Write the rules into each node's `CLAUDE.md` ([templates/](../templates/)) — behavior beats tooling.

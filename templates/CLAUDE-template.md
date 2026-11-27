@@ -47,8 +47,8 @@
 
 ## Code gates (merge = deploy)
 
-- Executable paths (scripts, hooks, routines, this file) change only via branch + PR; **a different node merges**; the second-model review is bound to the exact head commit. Content paths (wiki, log, index) stay multi-writer.
-- Never merge your own PR. Never bypass the push gate without the log marker and a 24 h review task.
+- Executable paths (scripts, hooks, routines, this file) change only via branch + PR. The review bot reviews the exact head commit; **the merge tool merges** once the proof for that head is there (docs/10, v2.1). At most one fix round, then the PR is parked for a human. Content paths (wiki, log, index) stay multi-writer.
+- Never merge by judgement. Never bypass the push gate without the log marker and a 24 h review task.
 
 ## Quality gates
 

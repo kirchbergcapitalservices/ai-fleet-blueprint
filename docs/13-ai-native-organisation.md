@@ -50,7 +50,9 @@ sleep.
 | lesson | a wiki article or a change to an agent definition | through the normal write path ([docs/02](02-llm-wiki.md)) |
 
 **One dispatcher, one claim per assignment.** Something must make sure each assignment runs
-exactly once — a single consumer per inbox that claims, runs, and writes the result. Moving a file
+exactly once — a single consumer per inbox that claims, runs, and writes the result. One consumer
+prevents two runs at the same time, not a second run later: before claiming, the dispatcher checks
+a durable ledger of assignment ids that are running or done, and skips an id it has seen. Moving a file
 in a synced folder is not a lock; a rename in git is a record, and the exclusion comes from one
 consumer process per inbox. Give every side effect (a mail drafted, a file published) its own id
 and **check that id at the destination before acting** — an id alone does not stop a retry. The

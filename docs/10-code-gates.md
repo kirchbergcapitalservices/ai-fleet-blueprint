@@ -9,12 +9,18 @@ This chapter describes the gates we put around executable change after a merge w
 review findings went live and broke the nightly jobs on two nodes. Everything here is cheap. All
 of it is boring. That is the point.
 
+> **Changed in v2.1.** Six weeks later the gates worked — and cost too much. Review loops,
+> second reviews of fixes and long test runs consumed more than they found. We simplified to
+> **one reviewer, one question, at most one re-check**, with the reviewer living in GitHub. The
+> new rule is the section [One reviewer, one question](#v21--one-reviewer-one-question-at-most-one-re-check)
+> below; Gates 1 and 2 describe how we got there and remain the fallback.
+
 ## What needs a gate — and what deliberately does not
 
 | Path class | PR required | Who merges | Why |
 |---|---|---|---|
-| scripts, hooks, routines, anything a node *executes* | **yes** | **a different node than the author** | merge = deploy; the author has already convinced themselves |
-| the agent's own instruction file (`CLAUDE.md`-style) | yes | a different node | it steers every future session on every node |
+| scripts, hooks, routines, anything a node *executes* | **yes** | v2.0: a different node than the author · **v2.1: the merge tool, after the proof** | merge = deploy; the author has already convinced themselves |
+| the agent's own instruction file (`CLAUDE.md`-style), agent definitions, review rules | yes | as above | they steer every future session on every node — Markdown that changes behaviour is code |
 | wiki articles, the append-only log, the index, handoff notes | **no** — multi-writer stays | — | 100+ commits a day from three writers; a gate here would stall the knowledge loop |
 
 **The content is not protected. The code is.** Protecting `main` wholesale would kill the
@@ -54,13 +60,57 @@ reviewed-by-second-model <sha12>, run <run-id>, verdict <OK|BLOCK>, note <free t
 | comment, not PR body | a watcher script reads comments and reviews; the body can be edited silently |
 | verdict bound to `sha12` | a review of an older head is not a review |
 | `BLOCK` must say for each P1: *pre-existing* (reproduced on the merge-base) or *introduced* | a pre-existing defect gets a follow-up task; an introduced one blocks; making a pre-existing defect newly reachable counts as introduced |
-| a bot's auto-review does not count | the gate is a *deliberate* run by the reviewer node with the full repo context |
+| a bot's auto-review did not count (until v2.1) | the gate was a *deliberate* run by the reviewer node with the full repo context — since v2.1 the bot, bound to the head commit, is the first reviewer |
 | docs-only PRs skip this gate | README, wiki text, comments without code |
 
 The run log stays on the reviewer node (hash-chained, see [docs/09](09-second-engine-broker.md));
 the comment is a **pointer, not a proof**. The real protection is still Gate 1 — the foreign
 merge. Gate 2 adds a reviewer that does not share the author's blind spots *or* the human
 reviewer's.
+
+## v2.1 — one reviewer, one question, at most one re-check
+
+What we measured after six weeks of Gates 1 and 2: every finding triggered a fix, every fix a new
+review, every review of the fix a new finding at the edge of the threat model — and full test
+suites with mutation testing ran for close to an hour per round. Real defects were still found,
+but almost none of them by the extra rounds.
+
+The rule now:
+
+| Tier | Applies to | What a merge needs |
+|---|---|---|
+| 0 | every changed file is documentation (`docs/`, wiki, README, log, index) | nothing |
+| 1 | code without a risk class | a review **by the review bot on exactly the head commit**, with no blocking (P0/P1) finding |
+| 2 | code in a risk class (auth, security posture, sending, money, deleting) | same as tier 1 |
+| 3 | sending, money or deleting **and** the bot found P0/P1 on any head of this PR | tier 1, plus **exactly one** independent human-or-node review |
+
+- **No verdict is not OK.** The proof is a review by the configured bot on exactly the head commit
+  without a blocking finding, or its explicit "no issues" reply to a review request for that head.
+  Silence, an "in progress" marker, the PR description or a review of an older head are not proof.
+- **The reviewer lives in GitHub.** A second-model review bot (offered as a GitHub integration by
+  several vendors) is set to review every pull request automatically, against review rules
+  written in the repository (with OpenAI Codex: a "Code Review Rules" section in `AGENTS.md`).
+  Check that automatic review is actually switched on — if it does not fire, request it once. Instructions to agents and review rules are not documentation —
+  they run as tier 1/2.
+- **The tool merges, not the author.** A small script measures the tier and the proof *at the
+  head commit being merged* and merges with `--match-head-commit`. Nobody merges by judgement.
+- **At most one fix head.** After the first fix the bot reviews once more. If it blocks again, the
+  PR is **parked** — no further fix, review or decision round; a human picks it up. A head that
+  only changes documentation does not count against the budget.
+- **Before that one fix is pushed**, the author runs a second model over the whole PR with the fix
+  highlighted — a self-check, not a merge proof. It once found in under a minute a defect that
+  the fix of a neighbouring PR had introduced.
+- **Pre-existing findings create no follow-up task.** Minor findings and old defects go into one
+  line in the PR description. The PR is not the place to fix the repository.
+- **No mutation testing.** Acceptance is the test suite of the touched tools, green, with a
+  positive and a negative case for every new decision.
+- **Enforcement sits on the server.** The local hook gives early feedback; on repositories that
+  change behaviour, branch protection with a required check (also for admins) is what actually
+  stops an unreviewed merge. The check accepts **either** proof for the head commit — the bot's
+  verdict or the fallback review line — so a bot outage does not lock the repository.
+- **The hand-run second-model review of Gate 2 is the fallback**: when the bot reports its limit,
+  for old PRs, and for repositories that do not live on GitHub. If either reviewer blocks a head,
+  the block wins.
 
 ## Gate 3 — the fleet inbox: review requests as git objects
 
@@ -90,8 +140,9 @@ confidential takes a node-local lane that never leaves the machine.
 ## Gate 4 — the watcher that counts what was skipped
 
 A rule that is only text decays. A small daily script lists merged PRs on code paths and checks:
-was there a review comment from a *different* node? Does it carry a verdict line bound to the
-merged SHA? Anything missing is reported — never fixed — on the fleet's notification channel.
+was there a valid proof for the head commit that was merged — since v2.1 the bot's verdict on that
+head, or the fallback review line bound to it? Anything missing is reported — never fixed — on the
+fleet's notification channel.
 
 Two design rules for the watcher, both learned by getting them wrong:
 
@@ -121,6 +172,8 @@ A bypass nobody has to write down is a gate nobody has to pass.
 | the rule erodes silently | daily watcher, report-only, Telegram-style channel |
 | gate blocks the fix for the gate | documented bypass with log marker + 24 h review task |
 | "the hub merges" becomes a bottleneck and a single point of failure | any non-author node may merge — gate on the *action*, not the *node* |
+| review loops cost more than they find | one reviewer, at most one fix head, then park; tiers by risk; no mutation testing (v2.1) |
+| a merge by judgement after a "looks fine" | a merge tool that measures tier and proof at the head commit |
 
 ## Minimal setup steps
 
@@ -129,7 +182,8 @@ A bypass nobody has to write down is a gate nobody has to pass.
 2. Install a versioned `pre-push` hook that rejects pushes to `origin/main` touching code paths
    (branches always pass). Keep the hook in the repo and install it with a script — a file in
    `.git/hooks` is never cloned.
-3. For repos that are all code, turn on branch protection with `enforce_admins`.
+3. For repos that are all code, turn on branch protection with `enforce_admins` **and a required
+   check** that passes only with a valid proof for the head commit (see v2.1).
 4. Create the inbox directories in `node-memory` and a 20-line `send` / `claim` / `done` script.
 5. Give the reviewer node a one-command second-model review (see [docs/09](09-second-engine-broker.md))
    and the exact comment format above.

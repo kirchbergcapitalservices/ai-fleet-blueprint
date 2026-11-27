@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.1 — November 2026
+
+Two questions follow as soon as one person's setup works: *how does a set of agents in chat
+windows become an organisation that works without me as the messenger — and how would this work
+across several companies?*
+
+### New
+
+- **docs/11 — The agent registry.** Agents and skills in their own reviewed repository; owner,
+  minimal tools, gates and a named reviewer in every definition; a live checkout per machine
+  that is never edited; a weekly team review that proposes merges, retirements and new roles.
+- **docs/12 — Group setup.** One GitHub organisation held by the group, hardened before the
+  first agent connects; one headless machine per company inside its own network; the rule
+  "global carries patterns, local carries data"; start with your own machine, then a second one.
+- **docs/13 — Running an AI-native organisation.** Chief of staff and organisation designer
+  first; assignments and handoffs as files instead of copy-paste between chats; an independent
+  reviewer for every author, preferably another model; approvals bound to a version; an
+  integrity watcher with a direct line; the five checks before anything runs unattended; net minutes as the test.
+- **Templates:** agent definition, GitHub organisation hardening checklist, new-company onboarding.
+
+### Changed
+
+- **docs/10 — Code gates simplified.** One reviewer (a second-model review bot in GitHub, bound
+  to the head commit), tiers by risk, the merge done by a tool that measures the proof, at most
+  one fix head and then park, no follow-up tasks for pre-existing findings, no mutation testing.
+  The hand-run second-model review is now the fallback. Reason: measured — the extra review and
+  test rounds cost far more than the defects they found.
+- **docs/00, README:** reading path for transformation leads; new hard-won rules.
+
 ## v2.0 — October 2026
 
 Everything in v1.1 was re-audited chapter by chapter against the live setup. Most of it held.

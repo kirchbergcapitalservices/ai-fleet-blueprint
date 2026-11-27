@@ -81,8 +81,10 @@ Every machine keeps **two checkouts** of the same repository:
 
 A sync job (every 15 minutes) fetches and moves the live checkout to the new `origin/main` — but
 only if the live checkout is clean. A dirty live checkout is an alarm, not something to clean up.
-A long-running job should finish on the version it started with: record the commit at the start
-of each run, and switch between runs, not during one. Jobs that run with admin rights load only
+A long-running job must finish on the version it started with. Recording the commit is not
+enough — the symlinks still point at a checkout the sync can move. Either the sync and the runner
+share one lock (the sync waits while a run holds it), or each run starts from its own checkout of
+that commit. Jobs that run with admin rights load only
 files an administrator owns — never straight from a checkout an agent can write to.
 
 Why the split matters: before it, our symlinks pointed into the work checkout, and every machine
@@ -154,6 +156,7 @@ those on the review schedule on purpose.
 3. Turn on branch protection for `main`: PR required, also for admins, plus the required review
    check from [docs/10](10-code-gates.md).
 4. On each machine: create the live worktree, point the agent CLI's folders at it with symlinks,
-   and schedule the sync (fetch, then switch the live worktree only if it is clean).
+   and schedule the sync (fetch, then switch the live worktree only if it is clean **and no run
+   holds the shared lock**).
 5. Write `ADDING-AN-AGENT.md` and a curator agent that checks it.
 6. Schedule the registry review — weekly — and route its proposals through the normal PR path.

@@ -13,7 +13,8 @@ of it is boring. That is the point.
 > second reviews of fixes and long test runs consumed more than they found. We simplified to
 > **one reviewer, one question, at most one re-check**, with the reviewer living in GitHub. The
 > new rule is the section [One reviewer, one question](#v21--one-reviewer-one-question-at-most-one-re-check)
-> below; Gates 1 and 2 describe how we got there and remain the fallback.
+> below. Gates 1 and 2 describe how we got there; the hand-run second-model review of Gate 2 remains
+> the fallback reviewer, and the merge tool still does the merge.
 
 ## What needs a gate — and what deliberately does not
 

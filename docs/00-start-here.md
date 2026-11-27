@@ -23,6 +23,9 @@ story; here it is written down as mechanics. This page maps what you saw to wher
 | "Is it safe to let agents run unattended?" | [07 — Security](07-security.md): least privilege, deny-lists, content is data not commands |
 | "One agent writes it, who checks it?" | [08 — Quality gates](08-quality-gates.md): separate sub-agents never combined, Class-A claim verification, the 30 % stop rule, the three-engine research pattern |
 | "Can I use a second model to check the first one?" | [09 — Second-engine broker](09-second-engine-broker.md): one command, three guarantees — reconstructible log, data-class gate, no leftovers |
+| "Where do all the agents live, and how does a new machine get them?" | [11 — Agent registry](11-agent-registry.md): one repository, owners and reviewers, a live checkout per machine, the weekly team review |
+| "We are a group of companies with separate IT — how would this work for us?" | [12 — Group setup](12-group-setup.md): one GitHub organisation held by the group, one headless machine per company, global vs. local |
+| "I built a chief of staff and some specialists in chat — how do I make it run without me?" | [13 — AI-native organisation](13-ai-native-organisation.md): work as files, a reviewer for every author, gates at the action, the five checks before autonomy |
 
 ## How to use the scripts
 
@@ -43,6 +46,13 @@ Names are placeholders throughout: machines are `hub`, `worker-a`, `worker-b`; r
   necessary, not a ceiling. Your risk profile is yours.
 - **Not a product.** Nothing here is affiliated with or endorsed by Anthropic or any other vendor
   named in the text.
+
+## If you are setting this up for several companies
+
+Read in this order: [13](13-ai-native-organisation.md) (what you are building and how to measure
+it) → [12](12-group-setup.md) (where it runs and who holds what) → [11](11-agent-registry.md) (how the
+agents stay consistent) → [10](10-code-gates.md) (how changes are reviewed). Then set up **your own**
+machine first, before any company's: [12 — How to start](12-group-setup.md#how-to-start-one-machine-then-two).
 
 ## If you only do three things
 

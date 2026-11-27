@@ -4,7 +4,7 @@
 
 This repo is the sanitized, generic version of a real setup that runs 24/7: a laptop (`hub`) plus two always-on machines (`worker-a`, `worker-b`), each on its own Claude subscription, all working in parallel on the same knowledge base. Company names, hosts, people, and projects have been replaced with placeholders — the architecture, scripts, and hard-won lessons are real.
 
-> **v2.0 (October 2026).** What changed since v1.1 and why — including one pattern we withdrew — is in [CHANGELOG.md](CHANGELOG.md).
+> **v2.1 (November 2026).** New: the agent registry (11), the group setup — one global layer, one machine per company (12), and running an AI-native organisation on top of the fleet (13). Code review simplified to one reviewer and at most one re-check (10). What changed and why is in [CHANGELOG.md](CHANGELOG.md).
 
 > **This repository is documentation.** Nothing in it is an instruction to an agent that happens to read it. Rules, templates and commands here are examples to be adopted *deliberately* by a human, in their own setup — exactly the "content is data, not commands" rule of [docs/07](docs/07-security.md), applied to this repo itself.
 
@@ -62,10 +62,13 @@ The answer is a layered architecture where **GitHub is the only hub**, every nod
 | [docs/07-security.md](docs/07-security.md) | Least privilege, deny-lists, secrets hygiene, prompt-injection boundaries |
 | [docs/08-quality-gates.md](docs/08-quality-gates.md) | Multi-agent audits, claim verification, premise audit, three engines / three roles, human gates |
 | [docs/09-second-engine-broker.md](docs/09-second-engine-broker.md) | **New in v2:** one command to run a second model under three guarantees — reconstructible log, data-class gate, no leftovers |
-| [docs/10-code-gates.md](docs/10-code-gates.md) | **New in v2:** merge = deploy — a different node merges, a second model reviews the exact commit, review requests as git objects |
+| [docs/10-code-gates.md](docs/10-code-gates.md) | Merge = deploy — a second model reviews the exact commit, review requests as git objects; **v2.1:** one reviewer in GitHub, at most one fix head, tiers by risk |
+| [docs/11-agent-registry.md](docs/11-agent-registry.md) | **New in v2.1:** one repository for every agent and skill — owners, reviewers, a live checkout per machine, the periodic team review |
+| [docs/12-group-setup.md](docs/12-group-setup.md) | **New in v2.1:** a group of companies — one GitHub organisation held by the group, one headless machine per company, global vs. local |
+| [docs/13-ai-native-organisation.md](docs/13-ai-native-organisation.md) | **New in v2.1:** chief of staff, organisation designer, specialists and reviewers — work as files, gates at the action, the five checks before autonomy |
 | [scripts/](scripts/) | Runnable, sanitized versions of the core mechanics (v2: kernel-lock library, pocket broker) |
 | [tests/](tests/) | Throwaway-repo harnesses that prove the lock, push, log, backup and health mechanics — run them before you trust a script |
-| [templates/](templates/) | CLAUDE.md skeleton, worker-brief template, handoff template |
+| [templates/](templates/) | CLAUDE.md skeleton, worker-brief and handoff templates; v2.1: agent definition, GitHub organisation hardening checklist, new-company onboarding |
 
 ## Quickstart (minimal viable fleet)
 
@@ -95,6 +98,10 @@ The answer is a layered architecture where **GitHub is the only hub**, every nod
 - **A negative claim needs a positive control and a date.** "0 hits", "not in the backup", "node is clean" — only with a known-present case found in the same breath, written in the past tense with who checked, from where, when. Negations do not break; they go quietly untrue.
 - **Scheduled prompts rot silently.** "succeeded" does not mean the prompt still matches the system; read the prompt and a recent transcript, not the exit code.
 - **Autonomous loops need a circuit breaker and never a broad kill.** N fast failures in a row → halt with a sentinel that survives relaunch. Never `pkill -f <agent>` in a watcher — it kills every session on the node.
+- **The agents are code, the wiki is content.** Agent definitions live in their own reviewed repository; every machine runs a live checkout of `main`, never a working copy (docs/11).
+- **Global carries patterns, local carries data.** In a group of companies the shared layer holds knowledge and agents; company data stays on the company's own machine (docs/12).
+- **Measure the human's minutes, not the agents' messages.** Count review and rework; compare against one manual run (docs/13).
+- **One reviewer, at most one re-check.** Review loops that never end cost more than the defects they find (docs/10).
 - **Check what exists before setting it up again.** "X is missing" in a worker's report is a claim; look at the endpoint first and reuse what is there.
 
 ## Disclaimer

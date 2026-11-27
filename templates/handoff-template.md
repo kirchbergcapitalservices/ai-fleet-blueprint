@@ -27,7 +27,7 @@ tags: [handoff, operations]
 - Canonical identity (set globally): `<noreply-identity>`; `origin-node: <node>` trailer on every automated commit.
 - Writes only through the locked helpers (`git-safe-commit-push.sh`, `log-append.sh`); runtime clones stay on `main`, build in worktrees.
 - Hygiene watcher: `git-hygiene-sync.sh` (cron :NN) — ff-pulls clean+behind, pushes clean+ahead, alerts otherwise, counts skips.
-- Executable change (scripts, hooks, routines): branch → PR → **a different node merges**.
+- Executable change (scripts, hooks, routines): branch → PR → review bot on the exact head → **the merge tool merges** (docs/10, v2.1).
 
 ## Scheduled jobs on this node — GENERATED, not hand-maintained
 > Produce this table with a script that reads the scheduler (launchd/cron) and checks
